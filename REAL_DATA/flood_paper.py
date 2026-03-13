@@ -11,45 +11,35 @@ import matplotlib.pyplot as plt
 import rpy2.robjects as ro
 from rpy2.robjects.packages import importr
 
-
-# =========================
-# Config (edit these)
-# =========================
 TIF_PATH = "/Users/lunarolland/Desktop/DATASETS/Spain_MIXED_BASE_OUTSIDE_EXTRA_FOCUS_NODUP.tif"
 OUT_CSV  = "/Users/lunarolland/Desktop/THESIS/flood_prop_bcp.csv"
 
-# Prior change probability p0 ~ 1/k, where k is expected segment length
+# Prior change probability 
 EXPECTED_BLOCK_LEN_K = 20.0       # p0 = 1/20 = 0.05
 
-# BCP sampling
 MCMC_SAMPLES = 2000
 BURNIN = 500
 
-# Fusion and thresholding
 FUSION = "vv"                     # "vv" | "vh" | "avg" | "or"
-THRESHOLD = 0.10                  # classify pixel flooded at time t if fused_prob[t] > THRESHOLD
+THRESHOLD = 0.10                  
 
-# ===== NEW: fixed window subset (top-right corner) =====
-# Set to (60, 60) for your requested subset; set to None for full run
+# WINDOW SUBSET
 SUBSET_WINDOW_HW: Optional[Tuple[int, int]] = (60, 60)  # (height, width)
 
-# Optional: clip dB ranges (helps if weird outliers)
 CLIP = True
 VV_RANGE = (-25.0, 0.0)
 VH_RANGE = (-35.0, -5.0)
 
 
-# =========================
-# Band parsing + stack build
-# =========================
+#BAND PARSING
 BAND_RE = re.compile(r"^(VV|VH)_(\d{8})$")
 
 @dataclass
 class TimeStacks:
-    vv: np.ndarray               # (T,H,W)
-    vh: np.ndarray               # (T,H,W)
-    dates: List[datetime]        # length T
-    valid_hw: np.ndarray         # (H,W) bool
+    vv: np.ndarray               
+    vh: np.ndarray              
+    dates: List[datetime]       
+    valid_hw: np.ndarray         
 
 
 def _parse_desc(desc: str) -> Tuple[str, datetime]:
@@ -72,7 +62,7 @@ def load_stacks_from_tif(path: str) -> TimeStacks:
         if any(d is None for d in descs):
             raise ValueError("Some band descriptions are missing; cannot map VV/VH to dates.")
 
-        # Map date -> {"VV": band_index, "VH": band_index}
+        # Map date 
         mapping: Dict[datetime, Dict[str, int]] = {}
         for b in range(1, nb + 1):
             pol, dt = _parse_desc(descs[b - 1])
@@ -106,10 +96,8 @@ def load_stacks_from_tif(path: str) -> TimeStacks:
     return TimeStacks(vv=vv, vh=vh, dates=dates, valid_hw=valid_hw)
 
 
-# =========================
-# R bcp runner (one series)
-# =========================
-_bcp = importr("bcp")  # fail fast if missing
+#R BCP RUNNER
+_bcp = importr("bcp")  
 
 
 def bcp_posterior_change_prob(series: np.ndarray, p0: float, mcmc: int, burnin: int) -> np.ndarray:
@@ -119,7 +107,7 @@ def bcp_posterior_change_prob(series: np.ndarray, p0: float, mcmc: int, burnin: 
     """
     y = np.asarray(series, dtype=float)
 
-    # bcp doesn't like NA/NaN
+
     if not np.all(np.isfinite(y)):
         med = np.nanmedian(y)
         y = np.where(np.isfinite(y), y, med)
@@ -127,13 +115,13 @@ def bcp_posterior_change_prob(series: np.ndarray, p0: float, mcmc: int, burnin: 
     r_y = ro.FloatVector(y.tolist())
     fit = _bcp.bcp(r_y, p0=p0, mcmc=mcmc, burnin=burnin, return_mcmc=False)
 
-    # bcp output field is usually "posterior.prob"
+
     if "posterior.prob" in fit.names:
         p = np.array(fit.rx2("posterior.prob"), dtype=float)
     else:
         raise RuntimeError(f"Unexpected bcp output fields: {list(fit.names)}")
 
-    # safety: ensure length matches
+
     if p.shape[0] != y.shape[0]:
         T = y.shape[0]
         if p.shape[0] > T:
@@ -143,9 +131,7 @@ def bcp_posterior_change_prob(series: np.ndarray, p0: float, mcmc: int, burnin: 
     return p
 
 
-# =========================
-# Fusion + plotting
-# =========================
+#FUSION AND PLOTTING
 def fuse(vv_p: np.ndarray, vh_p: np.ndarray, mode: str) -> np.ndarray:
     """
     vv_p, vh_p: (N,T)
@@ -159,7 +145,6 @@ def fuse(vv_p: np.ndarray, vh_p: np.ndarray, mode: str) -> np.ndarray:
     if mode == "avg":
         return 0.5 * (vv_p + vh_p)
     if mode == "or":
-        # probabilistic OR assuming independence-ish
         return 1.0 - (1.0 - vv_p) * (1.0 - vh_p)
     raise ValueError("FUSION must be one of: vv, vh, avg, or")
 
@@ -174,9 +159,7 @@ def plot_time_series(dates: List[datetime], y: np.ndarray, title: str, ylabel: s
     plt.show()
 
 
-# =========================
-# Main pipeline
-# =========================
+#MAIN 
 def run(
     tif_path: str,
     out_csv: str,
@@ -192,21 +175,19 @@ def run(
     T, H, W = vv.shape
     p0 = 1.0 / float(expected_block_len_k)
 
-    # ===== NEW: fixed window subset in the top-right corner =====
+    # WINDOW IN TOP RIGHT CORNER
     if subset_window_hw is not None:
         win_h, win_w = subset_window_hw
         win_h = min(int(win_h), H)
         win_w = min(int(win_w), W)
 
-        rr = slice(0, win_h)       # top rows
-        cc = slice(W - win_w, W)   # rightmost cols
+        rr = slice(0, win_h)       
+        cc = slice(W - win_w, W)   
 
-        # crop stacks: vv/vh are (T,H,W) -> (T,win_h,win_w)
         vv_win = vv[:, rr, cc]
         vh_win = vh[:, rr, cc]
         valid_win = valid_hw[rr, cc]
 
-        # flatten window to (Nwin,T)
         Nwin = win_h * win_w
         vv_2d = vv_win.reshape(T, Nwin).T
         vh_2d = vh_win.reshape(T, Nwin).T
@@ -217,8 +198,8 @@ def run(
 
         N = vv_valid.shape[0]
         print(f"Using top-right window {win_h}x{win_w} => {Nwin} pixels ({N} valid after masking).")
+   #FULL IMAGE - IGNORED BECAUSE TOO HEAVY
     else:
-        # Full image (original behavior, but without random subsetting)
         Npix = H * W
         valid_1d = valid_hw.reshape(Npix)
 
@@ -231,7 +212,6 @@ def run(
         N = vv_valid.shape[0]
         print(f"Using full image: valid pixel time series N={N}, T={T}")
 
-    # Allocate posterior prob arrays
     pvv = np.empty((N, T), dtype=np.float32)
     pvh = np.empty((N, T), dtype=np.float32)
 
@@ -245,13 +225,10 @@ def run(
 
     pfused = fuse(pvv, pvh, fusion_mode)
 
-    # Proportion flooded each time t
     flood_prop = np.mean(pfused > threshold, axis=0)
 
-    # Useful extra: max prob each time (often spikes at events)
     max_prob = np.max(pfused, axis=0)
 
-    # Save CSV
     with open(out_csv, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["date", "flooded_pixel_proportion", "max_posterior_cp_prob"])
@@ -259,7 +236,7 @@ def run(
             w.writerow([dt.strftime("%Y-%m-%d"), float(prop), float(mx)])
     print("Saved:", out_csv)
 
-    # Plot
+    #PLOT
     plot_time_series(
         dates,
         flood_prop,
