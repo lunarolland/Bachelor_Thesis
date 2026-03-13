@@ -1,7 +1,3 @@
-"""
-Flood pond simulation harness + ARL0/ARL1 CUSUM benchmarking + parameter sweep
-NOW INCLUDING: sweep over (smooth_k, kappa, h) + FAR columns in sweep output
-"""
 
 import os
 import json
@@ -11,61 +7,45 @@ import matplotlib.pyplot as plt
 from dataclasses import dataclass
 from typing import Dict, Tuple, List, Optional
 
-
-# =========================================================
-# RUN MODES
-# =========================================================
-# "main_only"     -> run sims, compute CUSUM tables, ARL tables, parameter sweep
-# "k_test_only"   -> only run k×k smoothing limit experiment
-# "main_then_k"   -> run main + then run k test (can be slow)
 RUN_MODE = "main_only"
 
 
-# =========================================================
-# USER SETTINGS
-# =========================================================
+#SETTINGS
 H, W = 100, 100
 T = 240
 BASELINE_DAYS = 90
 Q_THR = 99.99
 
-# Simulation counts
 N_SINGLE = 250
 N_DOUBLE = 250
 N_PERMANENT_OVERFLOW = 250
 
-# Dedicated ARL0 (no pond) simulations
 N_ARL0 = 600
-# Extra “harsher-noise” null sims (still no pond)
 N_ARL0_HEAVY_NOISE = 600
 
-# Output
+# OUTPUT
 OUT_DIR = "./sim_outputs"
 SAVE_METRICS_NPZ = True
 SAVE_FULL_CUBES = False
-PLOT_EXAMPLES_PER_SCENARIO = 0  # set >0 if you want plots
+PLOT_EXAMPLES_PER_SCENARIO = 0  # (or >0 to have plots)
 EXAMPLE_FRAMES = [0, 40, 80, 100, 120, 160, 239]
 
-# VV range and dark range
+#PARAMETERS
 VV_MIN, VV_MAX = -25.0, 0.0
 DARK_LO, DARK_HI = -25.0, -17.0
 
-# Background / clutter
 BG_MEAN = -10.0
 BG_SIGMA = 1.3
 
 SPECKLE_P = 0.015
 SPECKLE_RANGE = (-16.5, -13.0)
 
-# Flood pond texture
 POND_MEAN = -22.5
 POND_SIGMA = 0.6
 
-# Bump shape controls
 DURATION_RANGE = (25, 70)
 FLOOD_DAY_RANGE = (BASELINE_DAYS + 10, T - 30)
 
-# Radii ranges
 R_SINGLE_RANGE = (6.0, 22.0)
 R_DOUBLE_RANGE = (5.0, 16.0)
 R_PERMANENT_RANGE = (4.0, 10.0)
@@ -75,9 +55,7 @@ MARGIN = 10
 MASTER_SEED = 123
 
 
-# =========================================================
-# OPTIONAL: k×k smoothing limit test
-# =========================================================
+#kxk smoothing
 KTEST_ENABLE = False  # independent from RUN_MODE; RUN_MODE="main_then_k" will run it too
 K_LIST = [1, 3, 5, 7, 9, 11, 15, 21, 31, 51, 71, 91, 99]
 R_PEAK_GRID = np.concatenate([
@@ -90,34 +68,29 @@ OUT_DIR_KTEST = "./sim_outputs_k_tests"
 POST_FLOOD_WINDOW = (-5, 40)
 
 
-# =========================================================
-# CUSUM + PARAMETER SWEEP SETTINGS
-# =========================================================
+#CUSUM and parameter sweep
 CUSUM_BURN_IN = BASELINE_DAYS
 
 # Parameter sweep grids
 KAPPA_GRID = np.array([0.25, 0.5, 0.75, 1.0, 1.25], dtype=np.float32)
 H_GRID = np.array([6.0, 8.0, 10.0, 12.0, 16.0, 20.0, 24.0], dtype=np.float32)
 
-# SMOOTHING SWEEP (THIS IS NOW REAL)
-# These are box filter sizes (odd). 1 means no smoothing.
-SMOOTH_K_SWEEP = [1, 3, 5, 9, 15]  # adjust as desired
+# SMOOTHING SWEEP 
+SMOOTH_K_SWEEP = [1, 3, 5, 9, 15] 
 
-# Objective constraints / scoring for “best params”
-TARGET_ARL0_MIN = 80.0      # want ARL0 >= this (bigger means fewer false alarms)
-TARGET_ARL1_MAX = 25.0      # want ARL1 (mean run length after change) <= this
-MIN_DETECT_RATE = 0.90      # want detection rate >= this under change
+# Objective constraints 
+TARGET_ARL0_MIN = 80.0     
+TARGET_ARL1_MAX = 25.0     
+MIN_DETECT_RATE = 0.90    
 
-# Outputs
+#OUTPUTS
 OUT_CUSUM_PER_SIM = os.path.join(OUT_DIR, "cusum_per_sim_table.csv")
 OUT_ARL_TABLE = os.path.join(OUT_DIR, "arl_table.csv")
 OUT_PARAM_SWEEP = os.path.join(OUT_DIR, "cusum_param_sweep.csv")
 OUT_PARAM_BEST = os.path.join(OUT_DIR, "cusum_best_params.csv")
 
 
-# =========================================================
-# UTILITIES
-# =========================================================
+#UTILITIES
 def safe_mkdir(path: str):
     os.makedirs(path, exist_ok=True)
 
@@ -146,9 +119,7 @@ def cap_odd_k(k: int, H: int, W: int) -> int:
     return int(min(k, kmax))
 
 
-# =========================================================
-# BACKGROUND GENERATORS (null models)
-# =========================================================
+#BACKGROUND
 def make_background(rng: np.random.Generator,
                     bg_mean: float = BG_MEAN,
                     bg_sigma: float = BG_SIGMA,
@@ -161,9 +132,7 @@ def make_background(rng: np.random.Generator,
     return bg
 
 
-# =========================================================
-# BASELINE + SCORE + METRICS
-# =========================================================
+#BASELINE, SCORE, METRICS
 def robust_baseline(stack: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     med = np.nanmedian(stack, axis=0)
     q25 = np.nanpercentile(stack, 25, axis=0)
@@ -199,9 +168,7 @@ def compute_metrics(VV: np.ndarray) -> Tuple[float, np.ndarray, np.ndarray]:
     return thr, pct_dark, pct_flood
 
 
-# =========================================================
-# OPTIONAL SPATIAL SMOOTHING
-# =========================================================
+#SPATIAL SMOOTHNESS
 def box_mean(arr: np.ndarray, k: int) -> np.ndarray:
     if k % 2 == 0:
         raise ValueError("k must be odd")
@@ -250,16 +217,14 @@ def apply_spatial_smoothing_stack(VV: np.ndarray, k: int) -> np.ndarray:
     return out
 
 
-# =========================================================
-# SCENARIOS + METADATA
-# =========================================================
+#SCENARIO
 @dataclass
 class SimMeta:
     scenario: str
     flood_day: int
     width: float
     ponds: List[Dict]
-    onset_day: Optional[int] = None    # change-point for ARL1
+    onset_day: Optional[int] = None    
     offset_day: Optional[int] = None
 
 def sample_center(rng: np.random.Generator) -> Tuple[int, int]:
@@ -412,9 +377,7 @@ def gen_permanent_plus_overflow(rng: np.random.Generator) -> Tuple[np.ndarray, S
     return VV, meta
 
 
-# =========================================================
-# PLOTTING (optional)
-# =========================================================
+#PLOTTING
 def plot_example(VV: np.ndarray, pct_dark: np.ndarray, pct_flood: np.ndarray, meta: SimMeta, sim_id: int):
     fig = plt.figure(figsize=(14, 6))
     fig.suptitle(f"{meta.scenario} | sim {sim_id} | flood_day={meta.flood_day} | width={meta.width:.1f}", y=0.98)
@@ -444,9 +407,7 @@ def plot_example(VV: np.ndarray, pct_dark: np.ndarray, pct_flood: np.ndarray, me
     plt.show()
 
 
-# =========================================================
-# SIM RUNNER
-# =========================================================
+#SIMULATIONS
 def run_scenario(gen_fn, name: str, n_sims: int, rng: np.random.Generator, smooth_k: int = 1):
     thr_list = np.zeros((n_sims,), dtype=np.float32)
     pct_dark_all = np.zeros((n_sims, T), dtype=np.float32)
@@ -488,9 +449,7 @@ def run_scenario(gen_fn, name: str, n_sims: int, rng: np.random.Generator, smoot
     }
 
 
-# =========================================================
-# CUSUM + ARL COMPUTATION
-# =========================================================
+#CUSUM and ARLs
 def cusum_one_sided_up(x: np.ndarray, burn_in: int, kappa: float, h: float) -> Optional[int]:
     """
     One-sided (up) CUSUM on standardized series.
