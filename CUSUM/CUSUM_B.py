@@ -1,26 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-"""
-CUSUM with burn-in (baseline estimated from first B observations).
-
-What this script produces:
-1) cusum_parameter_table.csv
-   - one row per experiment setting (design x B x tau x delta) + ARL0-only rows
-   - describes ALL parameters used for each setting
-
-2) cusum_results_table.csv (+ .tex)
-   - one row per setting with performance summary:
-     ARL (mean), SDRL (sd), MED (median), Q10, Q90, SD_over_mean,
-     censored_frac, early_false_frac (ARL1 only)
-
-3) ONLY 2–4 histograms per design (NOT a million graphs):
-   - ARL0 run length histogram for B=50
-   - ARL0 log(1+RL) histogram for B=50
-   - ARL1 delay histogram for (B=50, tau=400, delta=0.5)
-   - ARL1 delay histogram for (B=50, tau=400, delta=2.0)
-"""
-
 import time
 import numpy as np
 import pandas as pd
@@ -28,9 +7,7 @@ import matplotlib.pyplot as plt
 from scipy import stats
 
 
-# ============================================================
-# 1) Core CUSUM logic (streaming = fast, no giant arrays)
-# ============================================================
+#CUSUM logic
 def estimate_baseline(x: np.ndarray) -> tuple[float, float]:
     if x.ndim != 1:
         raise ValueError("x must be a 1D array")
@@ -54,31 +31,16 @@ def cusum_alarm_time_stream(
     tau: int | None = None,
     delta: float | None = None,
 ) -> int | None:
-    """
-    2-sided standardized CUSUM with burn-in baseline estimation.
 
-    Burn-in:
-      X_0..X_{B-1} ~ N(mu0, sigma^2), estimate (mu_hat, sigma_hat).
-
-    Monitoring for t=B..T_max-1:
-      z_t = (X_t - mu_hat) / sigma_hat
-      S = max(0, S + z_t - k)
-      T = max(0, T - z_t - k)
-      alarm if S > h or T > h
-
-    Optional single change:
-      At time tau, mean shifts to mu0 +/- delta*sigma (random sign).
-    """
     if not (0 < B < T_max):
         raise ValueError("Need 0 < B < T_max")
     if h <= 0:
         raise ValueError("h must be > 0")
 
-    # Burn-in sample (baseline estimation)
+    # Burn-in sample 
     xB = rng.normal(loc=mu0, scale=sigma, size=B)
     mu_hat, sigma_hat = estimate_baseline(xB)
 
-    # Change setup (if any)
     if tau is not None:
         if not (0 < B < tau < T_max):
             raise ValueError("Need 0 < B < tau < T_max so change happens after burn-in.")
@@ -106,9 +68,7 @@ def cusum_alarm_time_stream(
     return None
 
 
-# ============================================================
-# 2) Simulators (light progress printing)
-# ============================================================
+#SIMULATOR
 def simulate_arl0_burnin(
     n_trials: int,
     T_max: int,
@@ -229,9 +189,7 @@ def simulate_arl1_burnin(
     }
 
 
-# ============================================================
-# 3) Tables: parameter table and results table
-# ============================================================
+#TABLES
 def make_parameter_table(
     designs: list[dict],
     B_grid: list[int],
@@ -246,7 +204,7 @@ def make_parameter_table(
 ) -> pd.DataFrame:
     rows = []
 
-    # ARL0 settings: design x B
+    # ARL0 
     for dsg in designs:
         for B in B_grid:
             rows.append({
@@ -266,7 +224,7 @@ def make_parameter_table(
                 "definition": "In-control. Burn-in length B used to estimate baseline. Phase II RL = t_alarm - B + 1."
             })
 
-    # ARL1 settings: design x B x tau x delta (only valid if B < tau)
+    # ARL1 
     for dsg in designs:
         for B in B_grid:
             for tau in tau_grid:
@@ -306,9 +264,7 @@ def describe_global_parameters(mu0, sigma, T_max, n_trials_arl0, n_trials_arl1, 
     ])
 
 
-# ============================================================
-# 4) Histogram plotting (ONLY the “final” ones)
-# ============================================================
+#HISTOGRAM
 def plot_hist(values: np.ndarray, title: str, xlabel: str, bins: int = 70) -> None:
     plt.figure(figsize=(7, 5))
     plt.hist(values, bins=bins)
@@ -327,36 +283,27 @@ def plot_log_hist(values: np.ndarray, title: str, xlabel: str, bins: int = 70) -
     plt.grid(True)
 
 
-# ============================================================
-# 5) MAIN
-# ============================================================
+#MAIN
 if __name__ == "__main__":
-    # ---------- Global parameters ----------
     mu0 = 0.0
     sigma = 1.0
 
-    # Longer runs (increase to 300_000 when you’re ready)
     T_max = 200_000
 
-    # Moderate trials (increase to 10_000 later if needed)
     n_trials_arl0 = 5_000
     n_trials_arl1 = 5_000
 
-    # Light progress printing (not too spammy)
     print_every = 1000
 
-    # Experimental grids
     B_grid = [20, 50, 100, 200]
     tau_grid = [200, 400, 800, 1500]
     deltas = [0.5, 2.0]
 
-    # Two designs (your numbers)
     designs = [
         {"label": "best_for_delta_0.5", "delta_star": 0.5, "k": 0.25, "h": 8.633},
         {"label": "best_for_delta_2.0", "delta_star": 2.0, "k": 1.00, "h": 2.644},
     ]
 
-    # ---------- Parameter tables ----------
     param_table = make_parameter_table(
         designs=designs,
         B_grid=B_grid,
@@ -376,21 +323,18 @@ if __name__ == "__main__":
     global_table.to_csv("cusum_global_parameters.csv", index=False)
     print("Saved: cusum_global_parameters.csv")
 
-    # ---------- Run simulations ----------
     results_rows = []
 
-    # These are the ONLY settings we will plot histograms for:
     FINAL_B_FOR_HISTS = 50
     FINAL_TAU_FOR_HISTS = 400
     FINAL_DELTAS_FOR_HISTS = (0.5, 2.0)
 
-    # Diagnostics flag and settings
     RUN_DIAGNOSTICS = True
-    ARL_METRIC = "mean"  # "mean" or "median" for ARL0 calculation in diagnostics
-    EXTEND_DIAG_DESIGNS = True  # if True, simulate extra (k,h) combos for richer ARL0 diagnostics
+    ARL_METRIC = "mean"  
+    EXTEND_DIAG_DESIGNS = True  
 
-    # Store ARL0 run_lengths for diagnostics (only if RUN_DIAGNOSTICS is True)
-    arl0_data_for_diagnostics = []  # List of dicts: {B, k, h, design, run_lengths, ARL0_mean, ARL0_median}
+    
+    arl0_data_for_diagnostics = [] 
 
     for dsg in designs:
         k, h = dsg["k"], dsg["h"]
@@ -398,7 +342,7 @@ if __name__ == "__main__":
         print(f"DESIGN: {dsg['label']}  (k={k}, h={h})")
         print(f"==========================================")
 
-        # ---- ARL0 (design x B) ----
+        # ARL0
         for B in B_grid:
             print(f"\n--- ARL0: B={B} ---")
             out0 = simulate_arl0_burnin(
@@ -432,7 +376,6 @@ if __name__ == "__main__":
                 "censored_frac": out0["censored_frac"],
             })
 
-            # Store data for diagnostics (if enabled)
             if RUN_DIAGNOSTICS:
                 arl0_data_for_diagnostics.append({
                     "B": B,
@@ -444,7 +387,6 @@ if __name__ == "__main__":
                     "ARL0_median": out0["MEDRL0"],
                 })
 
-            # FINAL ARL0 histograms: only B=50 (per design)
             if B == FINAL_B_FOR_HISTS:
                 plot_hist(
                     out0["run_lengths"],
@@ -459,7 +401,7 @@ if __name__ == "__main__":
                     bins=70
                 )
 
-        # ---- ARL1 (design x B x tau x delta) ----
+        # ARL1
         for B in B_grid:
             for tau in tau_grid:
                 if not (B < tau < T_max):
@@ -500,7 +442,7 @@ if __name__ == "__main__":
                         "n_detected_after_change": out1["n_detected_after_change"],
                     })
 
-                    # FINAL ARL1 histograms: only (B=50, tau=400, delta in {0.5,2.0})
+         
                     if (B == FINAL_B_FOR_HISTS) and (tau == FINAL_TAU_FOR_HISTS) and (delta in FINAL_DELTAS_FOR_HISTS):
                         if len(out1["delays"]) > 0:
                             plot_hist(
@@ -512,7 +454,7 @@ if __name__ == "__main__":
                         else:
                             print("No post-change detections for this setting; skipping delay histogram.")
 
-    # ---------- Results table ----------
+    # RESULTS
     results = pd.DataFrame(results_rows).sort_values(
         by=["design", "case", "B", "tau", "delta"],
         na_position="last"
@@ -540,40 +482,31 @@ if __name__ == "__main__":
 
     plt.show()
 
-    # ============================================================
-    # DIAGNOSTICS SECTION (gated by RUN_DIAGNOSTICS flag)
-    # ============================================================
+#DIAGNOSTIC
     if RUN_DIAGNOSTICS and len(arl0_data_for_diagnostics) > 0:
         print("\n" + "=" * 70)
         print("RUNNING DIAGNOSTICS")
         print("=" * 70)
 
-        # Helper function to get ARL0 value based on metric choice
         def get_arl0_value(data_dict):
             if ARL_METRIC == "median":
                 return data_dict["ARL0_median"]
             else:  # default to mean
                 return data_dict["ARL0_mean"]
 
-        # ============================================================
-        # 1) Q-Q Plot: Compare empirical run-length distribution to theoretical
-        # ============================================================
-        # Choose baseline scenario: first available (k,h) pair with default burn-in
-        # Prefer B=50 if available, otherwise use first B in grid
+#PLOTs
+         #1. QQ-PLOT
         baseline_B = FINAL_B_FOR_HISTS if any(d["B"] == FINAL_B_FOR_HISTS for d in arl0_data_for_diagnostics) else B_grid[0]
         baseline_data = [d for d in arl0_data_for_diagnostics if d["B"] == baseline_B]
         
         if len(baseline_data) > 0:
-            # Use first (k,h) pair found for this burn-in
             qq_data = baseline_data[0]
             run_lengths = qq_data["run_lengths"]
             k_qq, h_qq = qq_data["k"], qq_data["h"]
             B_qq = qq_data["B"]
             
-            # Q-Q plot: Compare log(run_length) to Normal distribution
-            # Using log transformation because run lengths are typically right-skewed
-            # and log-normal approximation is common for run-length distributions
-            log_rl = np.log(run_lengths + 1)  # log1p to handle zeros
+
+            log_rl = np.log(run_lengths + 1)  
             
             plt.figure(figsize=(8, 6))
             stats.probplot(log_rl, dist="norm", plot=plt)
@@ -585,38 +518,28 @@ if __name__ == "__main__":
             plt.show()
             print(f"Q-Q plot created for B={B_qq}, k={k_qq}, h={h_qq:.3f}")
 
-            # ============================================================
-            # 1b) Additional Q-Q Plot: Raw run-length vs Log-Normal and Exponential
-            # ============================================================
-            # Use raw run_lengths (not log-transformed) for comparison with log-normal and exponential
-            raw_rl = run_lengths  # Raw run lengths (not log-transformed)
+
+            raw_rl = run_lengths  
             
-            # Fit parameters for log-normal distribution
-            # Log-normal: if X ~ lognormal(s, scale), then log(X) ~ normal(log(scale), s)
-            # Estimate parameters from log-transformed data
-            log_rl_for_fit = np.log(raw_rl[raw_rl > 0] + 1)  # log1p to handle zeros
+          
+            log_rl_for_fit = np.log(raw_rl[raw_rl > 0] + 1) 
             if len(log_rl_for_fit) > 0:
                 mu_ln = np.mean(log_rl_for_fit)
                 sigma_ln = np.std(log_rl_for_fit, ddof=1)
-                # For scipy.stats.lognorm: s = sigma_ln, scale = exp(mu_ln)
                 s_ln = sigma_ln
                 scale_ln = np.exp(mu_ln)
             else:
                 s_ln, scale_ln = 1.0, 1.0
                 mu_ln, sigma_ln = 0.0, 1.0
-            
-            # Fit parameters for exponential distribution
-            # Exponential: rate parameter lambda = 1 / mean
-            # For scipy.stats.expon: location=0, scale=1/lambda
+
             mean_rl = np.mean(raw_rl)
             lambda_exp = 1.0 / mean_rl if mean_rl > 0 else 1.0
-            scale_exp = 1.0 / lambda_exp  # scale parameter for exponential
+            scale_exp = 1.0 / lambda_exp 
             
-            # Create figure with two subplots
+
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
             
             # Q-Q plot: Raw run-length vs Log-Normal
-            # Compare raw run-lengths directly to log-normal distribution
             stats.probplot(raw_rl, dist=stats.lognorm, sparams=(s_ln, 0, scale_ln), plot=ax1)
             ax1.set_title(f"Q-Q Plot: Raw RL vs Log-Normal\n(s={s_ln:.3f}, scale={scale_ln:.3f})\nB={B_qq}, k={k_qq}, h={h_qq:.3f}", 
                          fontsize=11, fontweight='bold')
@@ -636,11 +559,8 @@ if __name__ == "__main__":
             plt.show()
             print(f"Additional Q-Q plots created: Log-Normal and Exponential for B={B_qq}, k={k_qq}, h={h_qq:.3f}")
 
-            # ============================================================
-            # 1c) Q-Q vs Normal for finite samples of i.i.d. N(0,1)
-            #     (demonstrates that even *true* Normal data can look
-            #      non-Normal in the tails when n is small)
-            # ============================================================
+            # Q-Q vs Normal for finite samples of i.i.d. N(0,1)
+   
             rng_theory = np.random.default_rng(12345)
             sample_sizes = [50, 100, 200, 500]
             fig_norm, axes_norm = plt.subplots(2, 2, figsize=(12, 8))
@@ -655,7 +575,6 @@ if __name__ == "__main__":
                 ax.set_ylabel("Sample quantiles")
                 ax.grid(True, alpha=0.3)
 
-            # Hide unused subplots if any
             for j in range(len(sample_sizes), len(axes_norm)):
                 fig_norm.delaxes(axes_norm[j])
 
@@ -668,10 +587,9 @@ if __name__ == "__main__":
             plt.show()
             print("Normal-theory Q-Q sample-size demonstration created.")
 
-            # ============================================================
-            # 1d) Q-Q vs Normal for log(1+RL) using random subsamples
-            #     (shows how tail deviations become clearer as n grows)
-            # ============================================================
+            
+            # Q-Q vs Normal for log(1+RL) using random subsamples
+          
             subsizes = [50, 100, 500, 1000]
             subsizes = [n_sub for n_sub in subsizes if n_sub <= len(log_rl)]
             if len(subsizes) > 0:
@@ -701,14 +619,10 @@ if __name__ == "__main__":
                 plt.show()
                 print("RL subsample Q-Q sample-size demonstration created.")
 
-            # ============================================================
-            # 1e) Optionally extend ARL0 diagnostics with extra (k,h) pairs
-            #     (adds more points per B for the ARL0 boxplots/lines ONLY,
-            #      without touching the main simulation results table)
-            # ============================================================
+           
             if EXTEND_DIAG_DESIGNS:
                 print("\n[Diagnostics] Simulating additional ARL0 designs for richer boxplots...")
-                # Multipliers around each base (k,h) design
+           
                 k_multipliers = [0.8, 1.2]
                 h_multipliers = [0.9, 1.1]
                 diag_seed_base = 900000
@@ -755,10 +669,7 @@ if __name__ == "__main__":
                                     "ARL0_median": out_diag["MEDRL0"],
                                 })
 
-        # ============================================================
-        # 2) Line Plot: burn-in (x) vs ARL0 (y) with separate lines for (k,h) pairs
-        # ============================================================
-        # Group data by (k,h) pair
+      #LINE PLOT (burn in vs ALR0)
         kh_groups = {}
         for d in arl0_data_for_diagnostics:
             kh_key = (d["k"], d["h"], d["design"])
@@ -766,7 +677,6 @@ if __name__ == "__main__":
                 kh_groups[kh_key] = []
             kh_groups[kh_key].append(d)
         
-        # Sort each group by B
         for kh_key in kh_groups:
             kh_groups[kh_key].sort(key=lambda x: x["B"])
         
@@ -787,10 +697,7 @@ if __name__ == "__main__":
         plt.show()
         print(f"Line plot created: ARL0 ({ARL_METRIC}) vs burn-in")
 
-        # ============================================================
-        # 3) Boxplot: burn-in (x) vs ARL0 (y) across all (k,h) pairs
-        # ============================================================
-        # Group data by burn-in value
+      #BOX PLOT (burn in vs ARL0)
         B_groups = {}
         for d in arl0_data_for_diagnostics:
             B_val = d["B"]
@@ -798,7 +705,6 @@ if __name__ == "__main__":
                 B_groups[B_val] = []
             B_groups[B_val].append(get_arl0_value(d))
         
-        # Prepare data for boxplot: list of ARL0 arrays, one per burn-in
         sorted_B_vals = sorted(B_groups.keys())
         boxplot_data = [B_groups[B] for B in sorted_B_vals]
         
@@ -806,7 +712,6 @@ if __name__ == "__main__":
         bp = plt.boxplot(boxplot_data, labels=[str(B) for B in sorted_B_vals], 
                         patch_artist=True, showmeans=True)
         
-        # Style the boxes
         for patch in bp['boxes']:
             patch.set_facecolor('lightblue')
             patch.set_alpha(0.7)
