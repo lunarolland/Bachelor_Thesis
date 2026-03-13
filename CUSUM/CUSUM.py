@@ -153,8 +153,7 @@ if __name__ == "__main__":
             sigma=sigma,
             k=k
         )
-
-        # --- ARL0 (in control) ---
+        #ARL0
         arl0 = simulate_arl0(
             n_trials=n_trials_arl0,
             T_max=T_max,
@@ -174,10 +173,10 @@ if __name__ == "__main__":
             "mu0": mu0,
             "sigma": sigma,
             "T_max": T_max,
-            "tau": np.nan,          # not applicable
-            "delta": np.nan,        # not applicable
+            "tau": np.nan,          
+            "delta": np.nan,        #don't need it for ARL0
 
-            # results
+            #results
             "ARL": arl0["ARL0"],
             "SDRL": arl0["SDRL0"],
             "early_false_frac": np.nan,
@@ -185,7 +184,7 @@ if __name__ == "__main__":
             "n_detected_after_change": np.nan,
         })
 
-        # --- ARL1 (one change at tau, magnitude delta) ---
+        # ARL1
         for d in deltas:
             arl1 = simulate_arl1(
                 n_trials=n_trials_arl1,
@@ -221,22 +220,18 @@ if __name__ == "__main__":
 
     big_table = pd.DataFrame(rows)
 
-    # Nice ordering for readability
     big_table = big_table.sort_values(
         by=["delta_star", "case", "delta"],
         ascending=[True, True, True],
         na_position="last"
     )
 
-    # Print nicely in console
     pd.set_option("display.max_rows", 500)
     pd.set_option("display.width", 180)
     print(big_table.to_string(index=False, float_format=lambda x: f"{x:.3f}"))
 
-    # Export: CSV
     big_table.to_csv("cusum_big_table.csv", index=False)
 
-    # Export: LaTeX (xtable-like)
     latex = big_table.to_latex(
         index=False,
         float_format="%.3f",
@@ -249,23 +244,6 @@ if __name__ == "__main__":
 
     print("\nSaved: cusum_big_table.csv and cusum_big_table.tex")
 
-
-    
-    
-    
-    
-    
-    
-    
-    #R pacakge xtable : produces table in latex gviing it a dataframe
-    #tools to make my research easier: 1)Reference Manager (for organising papers, e.g : Zotera (The best), Mendeley,)
-    #                                  2)Starting and maintaing a research journal ("lab book") (each week: plan for the week,objectives (start)/what you do(during)/results (end))
-    #                                  3)Back up your work (e.g Dropbox/OneDrive/Git/GitHub)
-#TASK 1 : estimage mu abd sigma for CUSUM using k,h options I already have/the ones I know are good, I know what the distributions are but my algortithsl doesnt so for example N(0,1) to N(2,1) or N(0.5,1)
-#TASK 2 : think about what application i would like to do that and do a change, and try on acutal dataset (univariate/mutlivariante depends on example), find papers on google scholar to see on how they did it
-   # start looking for changepoint detection with esmated parameters - how large to make to burn 
-    
-    
     
     
     
