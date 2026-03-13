@@ -9,77 +9,64 @@ from datetime import datetime, date, timedelta
 import matplotlib.pyplot as plt
 from typing import Optional, List, Tuple, Dict, Any
 
-# =========================================================
-# USER SETTINGS
-# =========================================================
+#SETTINGS
 base_tif_path  = "/Users/lunarolland/Desktop/DATASETS/Spain_7370579_S1_VV_VH_.tif"
 extra_tif_path = "/Users/lunarolland/Desktop/DATASETS/Spain_7370579_S1_EXTRA_DESC_anyRelOrbit_20190911_20190929.tif"
 
-# Outside focus window: use ONLY this platform from BASE
+# Outside focus window
 PLATFORM_BASE = "S1A"  # "S1A" or "S1B"
 
-# Inside focus window: use BOTH platforms from EXTRA
+# Inside focus window
 PLATFORMS_EXTRA = ("S1A", "S1B")
 
-# Flood center date (defines the 1-year before/after window)
+# Flood center date 
 flood_center_date = date(2019, 9, 17)
 
-# Time window (score outputs for these dates)
+# Time window 
 start_date = flood_center_date - timedelta(days=365)
 end_date   = flood_center_date + timedelta(days=365)
 
-# Baseline window (pre-flood only)  [IMPORTANT: baseline uses BASE only]
+# Baseline window
 ref_start = flood_center_date - timedelta(days=365)
 ref_end   = flood_center_date - timedelta(days=1)
 
-# Focus window: ONLY use EXTRA here (prefer extra if available)
+# Focus window: ONLY use EXTRA here 
 focus_start = date(2019, 9, 11)
 focus_end   = date(2019, 9, 29)
 
-# Spatial smoothing scale (k=1 = none)
-k = 3  # try 1,3,5,7,...
+# Spatial smoothing scale 
+k = 3  
 
 # Clamp ranges (dB)
 VV_MIN, VV_MAX = -25.0, 0.0
 VH_MIN, VH_MAX = -35.0, -5.0
 
-# Flood score mix (VV usually stronger for open water)
+# Flood score mix 
 W_VV, W_VH = 0.7, 0.3
 
-# Baseline false positive rate target:
 BASELINE_Q = 99.9
 
-# Output folder
+# Output
 out_dir = "/Users/lunarolland/Desktop/flood_anomaly_outputs"
 SAVE_SCORE_TIFS = True
 SAVE_MASK_TIFS = True
 SHOW_PLOTS = True
 
-# Safer nodata for float GeoTIFFs than NaN
 NODATA_F = -9999.0
 
-# =========================================================
-# DARK% + MAP PRINTING (PNG QUICKLOOKS)
-# =========================================================
-# dark% definition: VV in [-25, -17] dB (after your existing processing: clamp + smoothing)
+# DARK% 
 DARK_VV_LO = -25.0
 DARK_VV_HI = -17.0
 
 SAVE_DARK_MASK_TIFS = True
-
-# "print it too" -> save quicklook PNGs for flood/dark masks (and optionally scores)
 SAVE_PNG_QUICKLOOKS = True
 PNG_DPI = 150
 
-# =========================================================
-# CUSUM SETTINGS (NO ARL0)
-# =========================================================
+#CUSUM PARAMETERS
 CUSUM_K = 1.25
-CUSUM_H = 12.0  # alarm threshold h
+CUSUM_H = 12.0  
 
-# =========================================================
-# SYNTHETIC "DUPLICATED" DAILY DATES IN FOCUS WINDOW
-# =========================================================
+#DUPLICATED WINDOW
 DUPLICATE_FOCUS_DAILY = True
 
 FOCUS_DUPLICATION_MAP = {
@@ -96,9 +83,7 @@ FOCUS_DUPLICATION_MAP = {
     date(2019, 9, 29): date(2019, 9, 29),
 }
 
-# =========================================================
-# HELPERS
-# =========================================================
+#HELPERS
 def parse_band(desc: str) -> Optional[dict]:
     """
     Parse band description to extract platform, timestamp, and polarization.
@@ -112,28 +97,23 @@ def parse_band(desc: str) -> Optional[dict]:
 
     d = desc.upper().strip()
 
-    # polarization
     pol = None
     if d.startswith("VV_") or d.endswith("_VV"):
         pol = "VV"
     elif d.startswith("VH_") or d.endswith("_VH"):
         pol = "VH"
 
-    # platform (may be missing in new style)
     plat = None
     if d.startswith("S1A_"):
         plat = "S1A"
     elif d.startswith("S1B_"):
         plat = "S1B"
 
-    # datetime:
-    # 1) old style with timestamp 20190917T053012
     m1 = re.search(r"(20\d{6}T\d{6})", d)
     if m1:
         dt = datetime.strptime(m1.group(1), "%Y%m%dT%H%M%S")
         return {"platform": plat, "pol": pol, "dt": dt, "desc": desc}
 
-    # 2) new style with date only: VV_20190917
     m2 = re.search(r"(20\d{6})$", d)
     if m2 and (d.startswith("VV_") or d.startswith("VH_")):
         dt = datetime.strptime(m2.group(1), "%Y%m%d")
@@ -263,10 +243,6 @@ def build_focus_virtual_dates() -> List[date]:
 def source_date_for_virtual(d: date) -> date:
     return FOCUS_DUPLICATION_MAP.get(d, d)
 
-
-# -------------------------
-# Dark% + PNG + CUSUM + polygon helpers
-# -------------------------
 def dark_mask_from_vv(VV_t: np.ndarray) -> np.ndarray:
     """Dark-water proxy mask: VV in [DARK_VV_LO, DARK_VV_HI] (finite only)."""
     m = np.isfinite(VV_t) & (VV_t >= DARK_VV_LO) & (VV_t <= DARK_VV_HI)
@@ -319,12 +295,8 @@ def mask_to_polygons_geojson(mask_u8: np.ndarray, transform, min_pixels: int = 5
     """
     feats = []
     for geom, val in shapes(mask_u8, mask=(mask_u8 == 1), transform=transform):
-        # crude size filter using pixel count:
-        # rasterio's shapes doesn't give area directly; easiest is to accept all then filter later if needed.
         feats.append({"type": "Feature", "properties": {"value": int(val)}, "geometry": geom})
 
-    # Optional: filter out tiny polygons by approximating pixel area via raster mask labeling would be more accurate.
-    # Keeping it simple: write all polygons; if you want filtering, tell me and I’ll add connected-component sizing.
     return {"type": "FeatureCollection", "features": feats}
 
 from skimage import measure
@@ -341,7 +313,6 @@ def plot_mask_with_outlines(mask_u8: np.ndarray, vv_backdrop: Optional[np.ndarra
     else:
         plt.imshow(mask_u8, cmap="gray")
 
-    # Extract contours (polygon outlines)
     contours = measure.find_contours(mask_u8, 0.5)
 
     for contour in contours:
@@ -353,14 +324,11 @@ def plot_mask_with_outlines(mask_u8: np.ndarray, vv_backdrop: Optional[np.ndarra
     plt.show()
 
 
-# =========================================================
-# MAIN
-# =========================================================
+#MAIN
 def main():
     safe_mkdir(out_dir)
 
     with rasterio.open(base_tif_path) as base_src, rasterio.open(extra_tif_path) as extra_src:
-        # Safety: require same grid
         if (base_src.width != extra_src.width or base_src.height != extra_src.height or
             base_src.transform != extra_src.transform or base_src.crs != extra_src.crs):
             raise RuntimeError(
@@ -371,7 +339,6 @@ def main():
         profile = base_src.profile
         transform = base_src.transform
 
-        # ---- Parse BASE bands ----
         base_parsed = []
         for band_i, desc in enumerate(base_src.descriptions, start=1):
             info = parse_band(desc)
@@ -380,7 +347,6 @@ def main():
             info["band"] = band_i
             base_parsed.append(info)
 
-        # BASE: only chosen platform
         base_parsed = [
             b for b in base_parsed
             if b["pol"] in ("VV", "VH") and b["dt"] is not None and b["platform"] == PLATFORM_BASE
@@ -388,7 +354,6 @@ def main():
         if not base_parsed:
             raise RuntimeError(f"No BASE bands found for platform {PLATFORM_BASE} with parsable dates.")
 
-        # ---- Parse EXTRA bands ----
         extra_parsed = []
         for band_i, desc in enumerate(extra_src.descriptions, start=1):
             info = parse_band(desc)
@@ -397,24 +362,22 @@ def main():
             info["band"] = band_i
             extra_parsed.append(info)
 
-        # EXTRA: allow S1A+S1B (or platform missing)
         extra_parsed = [
             b for b in extra_parsed
             if b["pol"] in ("VV", "VH") and b["dt"] is not None and
                (b["platform"] in PLATFORMS_EXTRA or b["platform"] is None)
         ]
 
-        # ---- Build available DATE lists ----
         base_dates = find_dates_available(base_parsed)
         extra_dates = find_dates_available(extra_parsed)
 
-        # Outside focus: use BASE dates
+        # Outside focus
         base_dates_window = [
             d for d in base_dates
             if start_date <= d <= end_date and not in_focus_window(d)
         ]
 
-        # Inside focus: use EXTRA (virtual or actual)
+        # Inside focus
         if DUPLICATE_FOCUS_DAILY:
             focus_virtual_dates = [
                 d for d in build_focus_virtual_dates()
@@ -438,7 +401,7 @@ def main():
 
         dates_window = sorted(base_dates_window + focus_dates_window)
 
-        # Baseline dates: BASE only
+        # Baseline dates:
         dates_ref = [d for d in base_dates if ref_start <= d <= ref_end]
 
         print(f"BASE acquisitions total ({PLATFORM_BASE}): {len(base_dates)}")
@@ -451,7 +414,7 @@ def main():
         if len(dates_ref) < 5:
             print("WARNING: Very few baseline dates. Baseline may be unstable.")
 
-        # ----- Build baseline stacks (BASE only) -----
+        #Baseline stacks
         print(f"\nBuilding per-pixel baseline using k={k} (BASE only) ...")
         VV_stack = []
         VH_stack = []
@@ -469,7 +432,7 @@ def main():
         VV_med, VV_iqr = robust_baseline(VV_stack)
         VH_med, VH_iqr = robust_baseline(VH_stack)
 
-        # ----- Compute baseline threshold -----
+        # Baseline threshold
         print(f"\nCalibrating global threshold from baseline at {BASELINE_Q}th percentile ...")
         baseline_scores = []
         for i, d in enumerate(dates_ref):
@@ -485,7 +448,7 @@ def main():
         THR_SCORE = float(np.percentile(baseline_scores, BASELINE_Q))
         print(f"THR_SCORE (from BASE baseline) = {THR_SCORE:.3f}\n")
 
-        # ----- Baseline % series (BASE only, pre-flood) -----
+        # Baseline time series
         print("Computing baseline dark% and flood% series (BASE only)...")
         dark_pct_ref = []
         flood_pct_ref = []
@@ -512,7 +475,7 @@ def main():
         print(f"Baseline dark%:  mean={dark_mu0:.4f}, std={dark_sd0:.4f}")
         print(f"Baseline flood%: mean={flood_mu0:.4f}, std={flood_sd0:.4f}\n")
 
-        # ----- Global plot scaling across the FULL mixed timeline -----
+        #Global plot
         if SHOW_PLOTS:
             print("Computing global plot scaling for score (consistent across dates)...")
             all_scores = []
@@ -535,7 +498,6 @@ def main():
             PLOT_VMAX = float(np.nanpercentile(S, 98))
             print(f"PLOT_VMIN={PLOT_VMIN:.3f}, PLOT_VMAX={PLOT_VMAX:.3f}\n")
 
-        # ----- (Optional) score each date & write outputs (same as before) -----
         print("Scoring dates and writing outputs...")
         for d_virtual in dates_window:
             if in_focus_window(d_virtual):
@@ -560,7 +522,6 @@ def main():
             flood_pct = percent_from_mask(flood_u8, np.isfinite(score))
             dark_pct = percent_from_mask(dark_u8, np.isfinite(VV_t))
 
-            # filename tags (keep provenance if duplicated)
             vtag = d_virtual.strftime("%Y%m%d")
             stag = d_source.strftime("%Y%m%d")
             dup_tag = f"_from_{stag}" if (d_virtual != d_source) else ""
@@ -627,16 +588,12 @@ def main():
                 plt.tight_layout()
                 plt.show()
 
-        # =====================================================
-        # TIME SERIES (Flood% + Dark%) + CUSUM alarm dates
-        # =====================================================
+        #TIME SERIES
         print("\nBuilding flood% and dark% time series...")
 
         dates_ts = []
         flooded_fraction_ts = []
         dark_fraction_ts = []
-
-        # helper to compute (score, floodmask, darkmask, vv_processed) for a virtual date
         def compute_products_for_virtual_date(d_virtual: date):
             if in_focus_window(d_virtual):
                 d_source = source_date_for_virtual(d_virtual) if DUPLICATE_FOCUS_DAILY else d_virtual
@@ -695,9 +652,7 @@ def main():
             plt.tight_layout()
             plt.show()
 
-        # =====================================================
-        # CUSUM detection + show maps at alarm dates (THIS IS THE NEW BIT)
-        # =====================================================
+        #CUSUM
         print("\nCUSUM detection (no ARL0 sims)...")
 
         dark_ts  = np.array(dark_fraction_ts, dtype=np.float32)
@@ -737,7 +692,7 @@ def main():
             plt.tight_layout()
             plt.show()
 
-        # ---- At alarm dates: visualize + write polygons ----
+        # VISUALISATION AT ALARM DATE
         def dump_alarm_products(kind: str, alarm_date: Optional[date]):
             """
             kind in {"dark", "flood"}
@@ -764,11 +719,9 @@ def main():
                 title = f"FLOOD ALARM {alarm_date} [{src_tag}] (pixels {d_source})"
                 base_name = f"ALARM_flood_{src_tag}_{vtag}{dup_tag}_k{k}"
 
-            # 1) Show it in Python (map + overlay on VV)
             if SHOW_PLOTS:
                 plot_mask_with_outlines(mask_u8, prod["VV_t"], title)
 
-            # 2) Save a quicklook PNG too (alarm-specific)
             if SAVE_PNG_QUICKLOOKS:
                 save_mask_png(
                     os.path.join(out_dir, f"{base_name}.png"),
@@ -776,7 +729,6 @@ def main():
                     title
                 )
 
-            # 3) Polygon outlines (GeoJSON) in map coordinates
             gj = mask_to_polygons_geojson(mask_u8, transform=transform)
             geojson_path = os.path.join(out_dir, f"{base_name}.geojson")
             with open(geojson_path, "w") as f:
